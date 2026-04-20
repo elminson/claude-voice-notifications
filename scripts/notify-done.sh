@@ -9,6 +9,13 @@ if [ -f "$DISABLED_FILE" ]; then
     exit 0
 fi
 
+# Read selected audio device (if configured)
+DEVICE_FILE="${HOME}/.claude/voice-notifications-device"
+DEVICE=""
+if [ -f "$DEVICE_FILE" ]; then
+    DEVICE=$(cat "$DEVICE_FILE" 2>/dev/null | tr -d '\n')
+fi
+
 # Read hook JSON from stdin (non-blocking)
 INPUT=""
 if ! [ -t 0 ]; then
@@ -34,7 +41,11 @@ fi
 MSG="${SESSION_ID} ${PROJECT} claude code work done"
 
 if command -v say &>/dev/null; then
-    say "$MSG" &
+    if [ -n "$DEVICE" ]; then
+        say -a "$DEVICE" "$MSG" &
+    else
+        say "$MSG" &
+    fi
 elif command -v espeak &>/dev/null; then
     espeak "$MSG" &
 elif command -v python3 &>/dev/null && python3 -c "import gtts" 2>/dev/null; then
@@ -45,9 +56,17 @@ tts = gTTS(sys.argv[1], lang='en')
 tts.save('/tmp/claude-notify-done.mp3')
 " "$MSG"
     if command -v paplay &>/dev/null; then
-        paplay /tmp/claude-notify-done.mp3 &
+        if [ -n "$DEVICE" ]; then
+            paplay --device="$DEVICE" /tmp/claude-notify-done.mp3 &
+        else
+            paplay /tmp/claude-notify-done.mp3 &
+        fi
     elif command -v mpv &>/dev/null; then
-        mpv --no-video /tmp/claude-notify-done.mp3 &
+        if [ -n "$DEVICE" ]; then
+            mpv --no-video --audio-device="pulse/$DEVICE" /tmp/claude-notify-done.mp3 &
+        else
+            mpv --no-video /tmp/claude-notify-done.mp3 &
+        fi
     elif command -v aplay &>/dev/null; then
         ffmpeg -y -i /tmp/claude-notify-done.mp3 /tmp/claude-notify-done.wav 2>/dev/null
         aplay /tmp/claude-notify-done.wav &

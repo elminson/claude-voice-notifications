@@ -38,9 +38,11 @@ cd claude-voice-notifications
 Inside Claude Code:
 
 ```
-/voice-notification        # show current status
-/voice-notification on     # enable
-/voice-notification off    # disable
+/voice-notification              # show status and current device
+/voice-notification on           # enable
+/voice-notification off          # disable
+/voice-notification devices      # list and select audio output device
+/voice-notification device <id>  # set output device directly
 ```
 
 ### Session identifier
@@ -67,10 +69,13 @@ Claude Code hook fires
        no
         |
         v
-  Detect TTS engine:
-    macOS  --> say
-    Linux  --> espeak
-    Docker --> gTTS + paplay/mpv
+  Read ~/.claude/voice-notifications-device
+        |
+        v
+  Detect TTS engine + route to device:
+    macOS  --> say -a <device>
+    Linux  --> espeak (default device)
+    Docker --> paplay --device=<device> / mpv --audio-device=pulse/<device>
 ```
 
 ### Hooks
@@ -83,6 +88,18 @@ The install script adds two hooks to `.claude/settings.json`:
 ### Toggle mechanism
 
 `/voice-notification off` creates `~/.claude/voice-notifications-disabled`. The scripts check for this file and exit immediately if it exists. `/voice-notification on` removes it.
+
+### Device selection
+
+`/voice-notification devices` lists available audio outputs and lets you pick one interactively. The selection is saved to `~/.claude/voice-notifications-device`. Scripts read this file on each notification and route audio to that device.
+
+| Platform | How device is used |
+|----------|-------------------|
+| macOS | `say -a <device>` |
+| PulseAudio | `paplay --device=<device>` |
+| mpv | `mpv --audio-device=pulse/<device>` |
+
+If no device is configured, the system default is used.
 
 ## Supported platforms
 
@@ -119,6 +136,7 @@ sudo apt install pulseaudio-utils  # for paplay
     notify-done.sh                   # "work done" notification
     notify-input.sh                  # "needs your input" notification
   voice-notifications-disabled       # flag file (only exists when off)
+  voice-notifications-device         # selected audio device name/ID
 
 <your-project>/                      # optional
   .claude/
