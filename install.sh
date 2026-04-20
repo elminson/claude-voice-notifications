@@ -52,6 +52,17 @@ if [ ! -f "$SETTINGS_FILE" ]; then
     echo "{}" > "$SETTINGS_FILE"
 fi
 
+# Validate existing JSON before modifying
+if ! python3 -c "import json; json.load(open('${SETTINGS_FILE}'))" 2>/dev/null && \
+   ! node -e "JSON.parse(require('fs').readFileSync('${SETTINGS_FILE}','utf8'))" 2>/dev/null; then
+    echo "ERROR: ${SETTINGS_FILE} contains invalid JSON. Please fix it first."
+    echo "  You can back it up and reset with: cp ${SETTINGS_FILE} ${SETTINGS_FILE}.bak && echo '{}' > ${SETTINGS_FILE}"
+    exit 1
+fi
+
+# Back up before modifying
+cp "$SETTINGS_FILE" "${SETTINGS_FILE}.bak"
+
 # Detect if node is available; fall back to python3; fall back to manual instructions
 if command -v node &>/dev/null; then
     node -e "
