@@ -1,12 +1,18 @@
 #!/bin/bash
 # TTS notification when Claude Code needs user input (tool approval, questions, etc.)
-# Plays: "<session-id> claude code needs your input"
+# Plays: "<session-id> <project> claude code needs your input"
 # Works on macOS (say) and in Linux/Docker (gTTS + PulseAudio or espeak)
 
 # Check if notifications are disabled
 DISABLED_FILE="${HOME}/.claude/voice-notifications-disabled"
 if [ -f "$DISABLED_FILE" ]; then
     exit 0
+fi
+
+# Read hook JSON from stdin (non-blocking)
+INPUT=""
+if ! [ -t 0 ]; then
+    INPUT=$(cat)
 fi
 
 # Determine session identifier from env or fallback
@@ -16,7 +22,16 @@ if [ -z "$SESSION_ID" ] && [ -n "${SANDBOX_CLIPBOARD_FILE:-}" ]; then
 fi
 SESSION_ID="${SESSION_ID:-local}"
 
-MSG="${SESSION_ID} claude code needs your input"
+# Extract project folder from hook JSON cwd, or fall back to PWD
+PROJECT=""
+if [ -n "$INPUT" ] && command -v jq &>/dev/null; then
+    PROJECT=$(echo "$INPUT" | jq -r '.cwd // .workspace.current_dir // empty' 2>/dev/null | xargs basename 2>/dev/null)
+fi
+if [ -z "$PROJECT" ]; then
+    PROJECT=$(basename "${PWD}" 2>/dev/null)
+fi
+
+MSG="${SESSION_ID} ${PROJECT} claude code needs your input"
 
 if command -v say &>/dev/null; then
     say "$MSG" &
