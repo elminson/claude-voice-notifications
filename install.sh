@@ -1,11 +1,11 @@
 #!/bin/bash
 # Install claude-voice-notifications
-# Copies scripts to ~/.claude/voice-notifications/ and installs the skill
+# Copies scripts to ~/.claude/voice-notifications/ and adds hooks to ~/.claude/settings.json
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 INSTALL_DIR="${HOME}/.claude/voice-notifications"
-SKILL_DIR=""
+SETTINGS_FILE="${HOME}/.claude/settings.json"
 
 echo "=== Claude Voice Notifications Installer ==="
 echo ""
@@ -18,8 +18,7 @@ cp "${SCRIPT_DIR}/scripts/notify-input.sh" "$INSTALL_DIR/"
 chmod +x "$INSTALL_DIR"/*.sh
 echo "  Done."
 
-# --- Install skill ---
-# Detect project root: walk up from cwd looking for .claude/ directory
+# --- Install skill (to project if available, otherwise to user-level) ---
 find_project_root() {
     local dir="$PWD"
     while [ "$dir" != "/" ]; do
@@ -40,24 +39,27 @@ if [ -n "$PROJECT_ROOT" ]; then
     cp "${SCRIPT_DIR}/skill/voice-notification/SKILL.md" "$SKILL_DIR/"
     echo "  Done."
 else
-    echo "WARNING: No .claude/ project directory found. Skill not installed."
-    echo "  To install manually, copy skill/voice-notification/ to your project's .claude/skills/"
+    echo "NOTE: No project .claude/ directory found. Skill not installed to project."
+    echo "  To use /voice-notification, copy skill/voice-notification/ to your project's .claude/skills/"
 fi
 
-# --- Update settings.json hooks ---
-SETTINGS_FILE="${PROJECT_ROOT:+${PROJECT_ROOT}/.claude/settings.json}"
-if [ -n "$SETTINGS_FILE" ] && [ -f "$SETTINGS_FILE" ]; then
-    echo ""
-    echo "Updating hooks in ${SETTINGS_FILE}..."
+# --- Update ~/.claude/settings.json hooks ---
+echo ""
+echo "Updating hooks in ${SETTINGS_FILE}..."
 
-    # Use node to safely merge hooks into settings.json
+mkdir -p "${HOME}/.claude"
+if [ ! -f "$SETTINGS_FILE" ]; then
+    echo "{}" > "$SETTINGS_FILE"
+fi
+
+# Detect if node is available; fall back to python3; fall back to manual instructions
+if command -v node &>/dev/null; then
     node -e "
 const fs = require('fs');
 const settings = JSON.parse(fs.readFileSync('${SETTINGS_FILE}', 'utf8'));
 
 if (!settings.hooks) settings.hooks = {};
 
-// Add Notification hook (notify-input)
 const notifHook = {
     hooks: [{
         type: 'command',
@@ -67,7 +69,6 @@ const notifHook = {
     }]
 };
 
-// Add Stop hook (notify-done)
 const stopHook = {
     hooks: [{
         type: 'command',
@@ -77,7 +78,6 @@ const stopHook = {
     }]
 };
 
-// Only add if not already present
 const hasNotif = (settings.hooks.Notification || []).some(h =>
     h.hooks && h.hooks.some(hh => hh.command && hh.command.includes('notify-input'))
 );
@@ -98,44 +98,60 @@ if (!hasStop) {
 
 fs.writeFileSync('${SETTINGS_FILE}', JSON.stringify(settings, null, 2) + '\n');
 "
-    echo "  Done."
-elif [ -n "$PROJECT_ROOT" ]; then
-    echo ""
-    echo "No settings.json found. Add these hooks manually to .claude/settings.json:"
+elif command -v python3 &>/dev/null; then
+    python3 -c "
+import json, os
+path = os.path.expanduser('${SETTINGS_FILE}')
+with open(path) as f:
+    settings = json.load(f)
+
+settings.setdefault('hooks', {})
+
+notif_hook = {'hooks': [{'type': 'command', 'command': '\"\$HOME\"/.claude/voice-notifications/notify-input.sh', 'timeout': 15, 'statusMessage': 'Playing input notification...'}]}
+stop_hook = {'hooks': [{'type': 'command', 'command': '\"\$HOME\"/.claude/voice-notifications/notify-done.sh', 'timeout': 15, 'statusMessage': 'Playing done notification...'}]}
+
+has_notif = any(
+    any('notify-input' in hh.get('command', '') for hh in h.get('hooks', []))
+    for h in settings['hooks'].get('Notification', [])
+)
+if not has_notif:
+    settings['hooks'].setdefault('Notification', []).append(notif_hook)
+    print('  Added Notification hook (notify-input.sh)')
+
+has_stop = any(
+    any('notify-done' in hh.get('command', '') for hh in h.get('hooks', []))
+    for h in settings['hooks'].get('Stop', [])
+)
+if not has_stop:
+    settings['hooks'].setdefault('Stop', []).append(stop_hook)
+    print('  Added Stop hook (notify-done.sh)')
+
+with open(path, 'w') as f:
+    json.dump(settings, f, indent=2)
+    f.write('\n')
+"
+else
+    echo "WARNING: Neither node nor python3 found. Add hooks manually to ${SETTINGS_FILE}:"
     echo ""
     cat <<'HOOKS'
 {
   "hooks": {
     "Notification": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "\"$HOME\"/.claude/voice-notifications/notify-input.sh",
-            "timeout": 15
-          }
-        ]
-      }
+      { "hooks": [{ "type": "command", "command": "\"$HOME\"/.claude/voice-notifications/notify-input.sh", "timeout": 15 }] }
     ],
     "Stop": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "\"$HOME\"/.claude/voice-notifications/notify-done.sh",
-            "timeout": 15
-          }
-        ]
-      }
+      { "hooks": [{ "type": "command", "command": "\"$HOME\"/.claude/voice-notifications/notify-done.sh", "timeout": 15 }] }
     ]
   }
 }
 HOOKS
 fi
+echo "  Done."
 
 echo ""
 echo "=== Installation complete ==="
 echo ""
+echo "Hooks installed to: ${SETTINGS_FILE} (applies to ALL projects)"
 echo "Voice notifications are ON by default."
 echo "Use /voice-notification to toggle on/off inside Claude Code."
 echo ""

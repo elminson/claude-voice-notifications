@@ -21,8 +21,8 @@ cd claude-voice-notifications
 
 The installer:
 1. Copies notification scripts to `~/.claude/voice-notifications/`
-2. Installs the `/voice-notification` skill to your project's `.claude/skills/`
-3. Adds `Notification` and `Stop` hooks to your project's `.claude/settings.json`
+2. Adds `Notification` and `Stop` hooks to `~/.claude/settings.json` (global, works across all projects)
+3. Installs the `/voice-notification` skill to your project's `.claude/skills/` (if in a project directory)
 
 ## Uninstall
 
@@ -114,17 +114,17 @@ sudo apt install pulseaudio-utils  # for paplay
 
 ```
 ~/.claude/
+  settings.json                      # hooks added here (global, all projects)
   voice-notifications/
-    notify-done.sh          # "work done" notification
-    notify-input.sh         # "needs your input" notification
-  voice-notifications-disabled   # flag file (only when off)
+    notify-done.sh                   # "work done" notification
+    notify-input.sh                  # "needs your input" notification
+  voice-notifications-disabled       # flag file (only exists when off)
 
-<your-project>/
+<your-project>/                      # optional
   .claude/
     skills/
       voice-notification/
-        SKILL.md            # /voice-notification skill
-    settings.json           # hooks added here by installer
+        SKILL.md                     # /voice-notification skill
 ```
 
 ## License
