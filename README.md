@@ -38,11 +38,40 @@ cd claude-voice-notifications
 Inside Claude Code:
 
 ```
-/voice-notification              # show status and current device
+/voice-notification              # show status
 /voice-notification on           # enable
 /voice-notification off          # disable
 /voice-notification devices      # list and select audio output device
 /voice-notification device <id>  # set output device directly
+```
+
+### Per-project sounds
+
+Configure a sound effect (instead of TTS) per project:
+
+```
+/voice-notification sound my-api done Glass      # "work done" → chime
+/voice-notification sound my-api input Ping      # "needs input" → ping
+/voice-notification sound default done Tink      # default for all projects
+/voice-notification sound list                   # show all configured sounds
+/voice-notification sound my-api remove          # revert to TTS
+```
+
+Sound values accepted:
+- **macOS system sound name** — `Glass`, `Ping`, `Pop`, `Tink`, `Bottle`, `Funk`, `Hero`, `Basso`, `Blow`, `Frog`, `Morse`, `Purr`, `Sosumi`, `Submarine`
+- **Bare filename** — looked up in `~/.claude/voice-notifications/sounds/`
+- **Absolute path** — `/path/to/sound.wav`
+- **`tts`** — force TTS even when a default is set
+
+See [`sounds/README.md`](sounds/README.md) for free/CC0 sound sources and how to install custom files.
+
+### False-positive suppression
+
+The "needs your input" notification is suppressed if it fires within N seconds of the "work done" notification (the default is 3 seconds). This prevents false alerts when Claude finishes a task and an internal hook event immediately follows.
+
+```
+/voice-notification cooldown 5    # extend to 5 seconds
+/voice-notification cooldown off  # disable suppression entirely
 ```
 
 ### Session identifier
@@ -131,18 +160,35 @@ sudo apt install pulseaudio-utils  # for paplay
 
 ```
 ~/.claude/
-  settings.json                      # hooks added here (global, all projects)
+  settings.json                           # hooks added here (global, all projects)
   voice-notifications/
-    notify-done.sh                   # "work done" notification
-    notify-input.sh                  # "needs your input" notification
-  voice-notifications-disabled       # flag file (only exists when off)
-  voice-notifications-device         # selected audio device name/ID
+    notify-done.sh                        # "work done" notification
+    notify-input.sh                       # "needs your input" notification
+    sounds/                               # drop custom sound files here
+  voice-notifications-disabled            # flag file (only when off)
+  voice-notifications-device             # selected audio device name/ID
+  voice-notifications-sounds.json        # per-project sound config
+  voice-notifications-cooldown           # false-positive cooldown seconds
+  voice-notifications-last-stop          # timestamp of last Stop event (auto-managed)
 
-<your-project>/                      # optional
+<your-project>/                           # optional
   .claude/
     skills/
       voice-notification/
-        SKILL.md                     # /voice-notification skill
+        SKILL.md                          # /voice-notification skill
+```
+
+### Example `~/.claude/voice-notifications-sounds.json`
+
+```json
+{
+  "defaults": { "done": "", "input": "" },
+  "projects": {
+    "api-service":  { "done": "Glass",  "input": "Ping"   },
+    "web-frontend": { "done": "Bottle", "input": "Pop"    },
+    "scripts":      { "done": "Tink",   "input": "tts"    }
+  }
+}
 ```
 
 ## License

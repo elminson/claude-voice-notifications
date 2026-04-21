@@ -13,6 +13,7 @@ echo ""
 # --- Install scripts ---
 echo "Installing scripts to ${INSTALL_DIR}..."
 mkdir -p "$INSTALL_DIR"
+mkdir -p "$INSTALL_DIR/sounds"
 cp "${SCRIPT_DIR}/scripts/notify-done.sh" "$INSTALL_DIR/"
 cp "${SCRIPT_DIR}/scripts/notify-input.sh" "$INSTALL_DIR/"
 chmod +x "$INSTALL_DIR"/*.sh
