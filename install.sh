@@ -18,6 +18,10 @@ cp "${SCRIPT_DIR}/scripts/notify-done.sh"     "$INSTALL_DIR/"
 cp "${SCRIPT_DIR}/scripts/notify-input.sh"    "$INSTALL_DIR/"
 cp "${SCRIPT_DIR}/scripts/notify-escalate.sh" "$INSTALL_DIR/"
 chmod +x "$INSTALL_DIR"/*.sh
+
+# Copy logo files for banner notifications
+[ -f "${SCRIPT_DIR}/logo.png" ]              && cp "${SCRIPT_DIR}/logo.png"              "$INSTALL_DIR/"
+[ -f "${SCRIPT_DIR}/logo-notification.png" ] && cp "${SCRIPT_DIR}/logo-notification.png" "$INSTALL_DIR/"
 echo "  Done."
 
 # --- Install skill (to project if available, otherwise to user-level) ---
@@ -175,3 +179,6 @@ echo "  /voice-notification test"
 echo ""
 echo "Optional env var:"
 echo "  CLAUDE_VOICE_SESSION_ID  — custom session name spoken in TTS (default: 'local')"
+echo ""
+echo "For banner notifications with the project logo, install terminal-notifier:"
+echo "  brew install terminal-notifier"

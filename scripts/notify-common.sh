@@ -95,19 +95,36 @@ PYEOF
 
 # ── Banner notification ───────────────────────────────────────────────────────
 
+# Logo for notifications — installed alongside the scripts
+_NOTIFICATION_LOGO="${HOME}/.claude/voice-notifications/logo-notification.png"
+
 send_banner() {
     local title="$1" message="$2"
     local enabled; enabled=$(_global "banner" "true")
     [ "$enabled" = "false" ] && return 0
 
-    # Sanitize for AppleScript / shell
+    # Prefer terminal-notifier (supports custom app icon)
+    # Install: brew install terminal-notifier
+    if command -v terminal-notifier &>/dev/null; then
+        local args=(-title "$title" -message "$message" -sender "com.apple.Terminal")
+        [ -f "$_NOTIFICATION_LOGO" ] && args+=(-appIcon "$_NOTIFICATION_LOGO")
+        terminal-notifier "${args[@]}" 2>/dev/null &
+        return 0
+    fi
+
+    # Sanitize for AppleScript strings
     local safe_t="${title//\\/\\\\}";  safe_t="${safe_t//\"/\\\"}"
     local safe_m="${message//\\/\\\\}"; safe_m="${safe_m//\"/\\\"}"
 
     if command -v osascript &>/dev/null; then
         osascript -e "display notification \"${safe_m}\" with title \"${safe_t}\"" 2>/dev/null &
     elif command -v notify-send &>/dev/null; then
-        notify-send "$title" "$message" 2>/dev/null &
+        # Linux: notify-send supports --icon
+        if [ -f "$_NOTIFICATION_LOGO" ]; then
+            notify-send --icon="$_NOTIFICATION_LOGO" "$title" "$message" 2>/dev/null &
+        else
+            notify-send "$title" "$message" 2>/dev/null &
+        fi
     fi
 }
 
