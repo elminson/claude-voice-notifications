@@ -1,244 +1,102 @@
 #!/bin/bash
-# TTS/sound notification when Claude Code finishes a task.
-# Mode "sound" : plays configured sound only
-# Mode "tts"   : speaks "work done" only
-# Mode "both"  : plays sound first, then speaks (default when sound is configured)
-# Works on macOS (say/afplay) and Linux/Docker (gTTS + PulseAudio or espeak)
+# Notification when Claude Code finishes a task.
+# Event types:  done (end_turn) · interrupted (max_tokens) · failure (error/other)
+# Each type has its own sound key, message, and banner text.
+# Set NOTIFY_TEST=1 to bypass stop_reason/quiet-hours checks during testing.
 
-# Check if notifications are disabled
-DISABLED_FILE="${HOME}/.claude/voice-notifications-disabled"
-if [ -f "$DISABLED_FILE" ]; then
-    exit 0
-fi
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=notify-common.sh
+source "${SCRIPT_DIR}/notify-common.sh"
 
-# Read selected audio device (if configured)
-DEVICE_FILE="${HOME}/.claude/voice-notifications-device"
-DEVICE=""
-if [ -f "$DEVICE_FILE" ]; then
-    DEVICE=$(cat "$DEVICE_FILE" 2>/dev/null | tr -d '\n')
-fi
+# ── Guards ────────────────────────────────────────────────────────────────────
 
-# Read hook JSON from stdin (non-blocking)
+[ -f "${HOME}/.claude/voice-notifications-disabled" ] && exit 0
+
+# ── Read stdin immediately (pipe closes after script starts) ──────────────────
 INPUT=""
-if ! [ -t 0 ]; then
-    INPUT=$(cat)
-fi
+if ! [ -t 0 ]; then INPUT=$(cat); fi
 
-# Check stop_reason — only act on genuine end-of-turn completions.
-# "tool_use"  → Claude is pausing to run a tool (intermediate step, not done)
-# "end_turn"  → Claude truly finished responding
-# If stop_reason is present and not end_turn, exit silently so we don't play
-# "work done" mid-task and don't write the timestamp that would suppress real
-# "needs your input" notifications for tool approvals.
+# ── Determine event type from stop_reason ─────────────────────────────────────
+# end_turn   → Claude truly finished           → "work done"
+# tool_use   → Intermediate tool call          → skip entirely
+# max_tokens → Hit context limit               → "check this"
+# error/*    → Something went wrong            → "error encountered"
 STOP_REASON=""
-if [ -n "$INPUT" ] && command -v jq &>/dev/null; then
-    STOP_REASON=$(echo "$INPUT" | jq -r '.stop_reason // empty' 2>/dev/null | grep -v '^null$')
-elif [ -n "$INPUT" ] && command -v python3 &>/dev/null; then
-    STOP_REASON=$(python3 -c "
+if [ -n "$INPUT" ]; then
+    if command -v jq &>/dev/null; then
+        STOP_REASON=$(echo "$INPUT" | jq -r '.stop_reason // empty' 2>/dev/null | grep -v '^null$')
+    elif command -v python3 &>/dev/null; then
+        STOP_REASON=$(python3 -c "
 import json,sys
-try:
-    d=json.loads(sys.stdin.read())
-    print(d.get('stop_reason',''))
-except:
-    print('')
+try: print(json.loads(sys.stdin.read()).get('stop_reason',''))
+except: print('')
 " <<< "$INPUT" 2>/dev/null)
+    fi
 fi
 
-if [ -n "$STOP_REASON" ] && [ "$STOP_REASON" != "end_turn" ]; then
-    exit 0
+EVENT_TYPE="done"
+MSG_SUFFIX="work done"
+BANNER_MSG="Work done"
+SOUND_KEY="done"
+
+if [ "${NOTIFY_TEST:-0}" != "1" ] && [ -n "$STOP_REASON" ]; then
+    case "$STOP_REASON" in
+        end_turn)  ;;   # defaults above are correct
+        tool_use)  exit 0 ;;   # intermediate step — skip
+        max_tokens)
+            EVENT_TYPE="interrupted"
+            MSG_SUFFIX="check this"
+            BANNER_MSG="Check this — hit token limit"
+            SOUND_KEY="failure" ;;
+        *)
+            EVENT_TYPE="failure"
+            MSG_SUFFIX="error encountered"
+            BANNER_MSG="Error encountered"
+            SOUND_KEY="failure" ;;
+    esac
 fi
 
-# Determine session identifier from env or fallback
+# ── Quiet hours ───────────────────────────────────────────────────────────────
+[ "${NOTIFY_TEST:-0}" != "1" ] && is_quiet_hours && exit 0
+
+# ── Context ───────────────────────────────────────────────────────────────────
 SESSION_ID="${CLAUDE_VOICE_SESSION_ID:-}"
 if [ -z "$SESSION_ID" ] && [ -n "${SANDBOX_CLIPBOARD_FILE:-}" ]; then
-    SESSION_ID=$(echo "$SANDBOX_CLIPBOARD_FILE" | sed 's/.*clipboard-\(.*\)-claude-sandbox.*/\1/')
+    SESSION_ID=$(echo "$SANDBOX_CLIPBOARD_FILE" \
+        | sed 's/.*clipboard-\(.*\)-claude-sandbox.*/\1/')
 fi
 SESSION_ID="${SESSION_ID:-local}"
 
-# Extract project folder from hook JSON cwd, or fall back to PWD
 PROJECT=""
 if [ -n "$INPUT" ] && command -v jq &>/dev/null; then
-    PROJECT=$(echo "$INPUT" | jq -r '.cwd // .workspace.current_dir // empty' 2>/dev/null | xargs basename 2>/dev/null)
+    PROJECT=$(echo "$INPUT" \
+        | jq -r '.cwd // .workspace.current_dir // empty' 2>/dev/null \
+        | xargs basename 2>/dev/null)
 fi
-if [ -z "$PROJECT" ]; then
-    PROJECT=$(basename "${PWD}" 2>/dev/null)
-fi
+[ -z "$PROJECT" ] && PROJECT=$(basename "${PWD}" 2>/dev/null)
 
-# Record last-stop timestamp — used by notify-input.sh to suppress false positives.
-# Written AFTER the stop_reason check so it only reflects genuine end_turn events.
+# ── Timestamps ────────────────────────────────────────────────────────────────
+# Write last-stop (only for genuine completions — not tool_use which already exited)
 echo "$(date +%s)" > "${HOME}/.claude/voice-notifications-last-stop"
+# Cancel any pending escalation for this project
+echo "0" > "${HOME}/.claude/voice-notifications-last-input"
 
-# Look up per-project sound + mode config
-# Config file: ~/.claude/voice-notifications-sounds.json
-# Format: {"projects": {"proj": {"done": "Glass", "input": "Ping", "mode": "both"}}, "defaults": {...}}
-# mode values: "sound" (sound only), "tts" (voice only), "both" (sound then voice)
-SOUND=""
-MODE=""
-SOUNDS_FILE="${HOME}/.claude/voice-notifications-sounds.json"
-if [ -f "$SOUNDS_FILE" ] && [ -n "$PROJECT" ]; then
-    if command -v jq &>/dev/null; then
-        SOUND=$(jq -r --arg p "$PROJECT" \
-            '.projects[$p].done // .defaults.done // empty' \
-            "$SOUNDS_FILE" 2>/dev/null | grep -v '^null$')
-        MODE=$(jq -r --arg p "$PROJECT" \
-            '.projects[$p].mode // .defaults.mode // empty' \
-            "$SOUNDS_FILE" 2>/dev/null | grep -v '^null$')
-    elif command -v python3 &>/dev/null; then
-        _cfg=$(python3 - "$PROJECT" <<'PYEOF'
-import json, sys
-try:
-    import os
-    path = os.path.expanduser("~/.claude/voice-notifications-sounds.json")
-    with open(path) as f:
-        cfg = json.load(f)
-    p = sys.argv[1]
-    proj = cfg.get("projects", {}).get(p, {})
-    defs = cfg.get("defaults", {})
-    sound = proj.get("done") or defs.get("done") or ""
-    mode  = proj.get("mode")  or defs.get("mode")  or ""
-    print(sound + "|" + mode)
-except Exception:
-    print("|")
-PYEOF
-        )
-        SOUND="${_cfg%%|*}"
-        MODE="${_cfg##*|}"
-    fi
-fi
+# ── Per-project config ────────────────────────────────────────────────────────
+DEVICE=""
+DEVICE_FILE="${HOME}/.claude/voice-notifications-device"
+[ -f "$DEVICE_FILE" ] && DEVICE=$(cat "$DEVICE_FILE" 2>/dev/null | tr -d '\n')
 
-# Default mode: if a sound is configured use "both"; if not, use "tts"
-if [ -z "$MODE" ]; then
-    if [ -n "$SOUND" ]; then
-        MODE="both"
-    else
-        MODE="tts"
-    fi
-fi
+SOUND=$(_cfg "$PROJECT" "$SOUND_KEY")
+VOICE=$(_cfg "$PROJECT" "voice")
+VOLUME=$(_cfg "$PROJECT" "volume"); VOLUME="${VOLUME:-1.0}"
+MODE=$(_cfg "$PROJECT" "mode")
 
-# Resolve a sound name/path to a playable file path.
-# Accepts: macOS system sound names (Glass, Ping, …), absolute paths,
-# ~/relative paths, or bare names looked up in ~/.claude/voice-notifications/sounds/
-resolve_sound_file() {
-    local sound="$1"
-    [ -z "$sound" ] && return 1
-    [ "$sound" = "tts" ] && return 1
+# ── Banner ────────────────────────────────────────────────────────────────────
+send_banner "Claude Code — $PROJECT" "$BANNER_MSG"
 
-    local file=""
-    if [[ "$sound" == /* ]]; then
-        file="$sound"
-    elif [[ "$sound" == ~* ]]; then
-        file="${sound/#\~/$HOME}"
-    else
-        local user_sounds="${HOME}/.claude/voice-notifications/sounds"
-        for candidate in \
-            "/System/Library/Sounds/${sound}.aiff" \
-            "/System/Library/Sounds/${sound}" \
-            "${user_sounds}/${sound}" \
-            "${user_sounds}/${sound}.wav" \
-            "${user_sounds}/${sound}.aiff" \
-            "${user_sounds}/${sound}.mp3" \
-            "/usr/share/sounds/${sound}" \
-            "/usr/share/sounds/freedesktop/stereo/${sound}.oga" \
-        ; do
-            if [ -f "$candidate" ]; then
-                file="$candidate"
-                break
-            fi
-        done
-    fi
+# ── Log ───────────────────────────────────────────────────────────────────────
+log_notification "$EVENT_TYPE" "$PROJECT" "stop_reason=${STOP_REASON:-end_turn}"
 
-    [ -z "$file" ] && return 1
-    [ ! -f "$file" ] && return 1
-    echo "$file"
-}
-
-# Play a sound file — blocking (for "both" mode, so it finishes before TTS starts)
-play_sound_sync() {
-    local file="$1"
-    if command -v afplay &>/dev/null; then
-        afplay "$file"
-    elif command -v paplay &>/dev/null; then
-        if [ -n "$DEVICE" ]; then
-            paplay --device="$DEVICE" "$file"
-        else
-            paplay "$file"
-        fi
-    elif command -v aplay &>/dev/null; then
-        aplay "$file"
-    elif command -v mpv &>/dev/null; then
-        mpv --no-video --quiet "$file"
-    else
-        return 1
-    fi
-    return 0
-}
-
-# Play a sound file — non-blocking (for "sound" only mode)
-play_sound_async() {
-    local file="$1"
-    play_sound_sync "$file" &
-}
-
-# Play TTS — always async
-play_tts() {
-    local msg="$1"
-    if command -v say &>/dev/null; then
-        if [ -n "$DEVICE" ]; then
-            say -a "$DEVICE" "$msg" &
-        else
-            say "$msg" &
-        fi
-    elif command -v espeak &>/dev/null; then
-        espeak "$msg" &
-    elif command -v python3 &>/dev/null && python3 -c "import gtts" 2>/dev/null; then
-        python3 -c "
-from gtts import gTTS
-import sys
-tts = gTTS(sys.argv[1], lang='en')
-tts.save('/tmp/claude-notify-done.mp3')
-" "$msg"
-        if command -v paplay &>/dev/null; then
-            if [ -n "$DEVICE" ]; then
-                paplay --device="$DEVICE" /tmp/claude-notify-done.mp3 &
-            else
-                paplay /tmp/claude-notify-done.mp3 &
-            fi
-        elif command -v mpv &>/dev/null; then
-            if [ -n "$DEVICE" ]; then
-                mpv --no-video --audio-device="pulse/$DEVICE" /tmp/claude-notify-done.mp3 &
-            else
-                mpv --no-video /tmp/claude-notify-done.mp3 &
-            fi
-        elif command -v aplay &>/dev/null; then
-            ffmpeg -y -i /tmp/claude-notify-done.mp3 /tmp/claude-notify-done.wav 2>/dev/null
-            aplay /tmp/claude-notify-done.wav &
-        fi
-    fi
-}
-
-MSG="${SESSION_ID} ${PROJECT} claude code work done"
-
-case "$MODE" in
-    sound)
-        # Sound effect only — no TTS
-        SOUND_FILE=$(resolve_sound_file "$SOUND")
-        if [ -n "$SOUND_FILE" ]; then
-            play_sound_async "$SOUND_FILE"
-        else
-            # Sound configured but file not found — fall back to TTS
-            play_tts "$MSG"
-        fi
-        ;;
-    both)
-        # Sound first (blocks until done), then TTS
-        SOUND_FILE=$(resolve_sound_file "$SOUND")
-        if [ -n "$SOUND_FILE" ]; then
-            play_sound_sync "$SOUND_FILE"
-        fi
-        play_tts "$MSG"
-        ;;
-    tts|*)
-        # TTS only
-        play_tts "$MSG"
-        ;;
-esac
+# ── Audio ─────────────────────────────────────────────────────────────────────
+MSG="${SESSION_ID} ${PROJECT} ${MSG_SUFFIX}"
+dispatch_audio "$SOUND" "$MODE" "$VOICE" "$VOLUME" "$DEVICE" "$MSG"

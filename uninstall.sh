@@ -5,6 +5,9 @@ set -euo pipefail
 INSTALL_DIR="${HOME}/.claude/voice-notifications"
 DISABLED_FILE="${HOME}/.claude/voice-notifications-disabled"
 SETTINGS_FILE="${HOME}/.claude/settings.json"
+COOLDOWN_FILE="${HOME}/.claude/voice-notifications-cooldown"
+LAST_STOP_FILE="${HOME}/.claude/voice-notifications-last-stop"
+LAST_INPUT_FILE="${HOME}/.claude/voice-notifications-last-input"
 
 echo "=== Claude Voice Notifications Uninstaller ==="
 echo ""
@@ -18,10 +21,8 @@ else
     echo "Scripts not found at ${INSTALL_DIR} — skipping."
 fi
 
-# Remove disabled flag
-if [ -f "$DISABLED_FILE" ]; then
-    rm -f "$DISABLED_FILE"
-fi
+# Remove runtime flag files
+rm -f "$DISABLED_FILE" "$COOLDOWN_FILE" "$LAST_STOP_FILE" "$LAST_INPUT_FILE"
 
 # Remove hooks from ~/.claude/settings.json
 if [ -f "$SETTINGS_FILE" ]; then

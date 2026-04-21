@@ -1,15 +1,18 @@
 # Claude Voice Notifications
 
-TTS voice notifications for [Claude Code](https://claude.ai/code). Get audio alerts when Claude finishes a task or needs your input — useful when running multiple sessions.
+Audio notifications for [Claude Code](https://claude.ai/code) — hear when Claude finishes, needs your input, or hits an error. Useful when running multiple sessions or working across windows.
 
-## What it does
+## What you hear
 
-| Event | What you hear |
-|-------|--------------|
-| Claude finishes work (`Stop`) | *"local claude code work done"* |
-| Claude needs input (`Notification`) | *"local claude code needs your input"* |
+| Event | Default |
+|-------|---------|
+| Work done (`end_turn`) | *"local my-api work done"* |
+| Hit token limit (`max_tokens`) | *"local my-api check this"* |
+| Error | *"local my-api error encountered"* |
+| Needs input | *"local my-api claude code needs your input"* |
+| No response after N seconds | *"local my-api still needs your input"* (escalation) |
 
-The session identifier (e.g., `local`, `main-2`) is spoken first so you know which instance needs attention.
+Each event can play a sound effect, TTS, or both — configured per project.
 
 ## Install
 
@@ -19,187 +22,250 @@ cd claude-voice-notifications
 ./install.sh
 ```
 
-The installer:
-1. Copies notification scripts to `~/.claude/voice-notifications/`
-2. Adds `Notification` and `Stop` hooks to `~/.claude/settings.json` (global, works across all projects)
-3. Installs the `/voice-notification` skill to your project's `.claude/skills/` (if in a project directory)
+### Homebrew (once a release tag exists)
+
+```bash
+brew install elminson/tap/claude-voice-notifications
+# then follow the post-install instructions
+```
+
+The installer copies scripts to `~/.claude/voice-notifications/` and adds `Notification` + `Stop` hooks to `~/.claude/settings.json` (global, all projects).
 
 ## Uninstall
 
 ```bash
-cd claude-voice-notifications
 ./uninstall.sh
 ```
 
-## Usage
+---
 
-### Toggle notifications
+## Usage — `/voice-notification` skill
 
-Inside Claude Code:
+All configuration is done inside Claude Code with the `/voice-notification` skill.
+
+### Toggle & device
 
 ```
-/voice-notification              # show status
-/voice-notification on           # enable
-/voice-notification off          # disable
-/voice-notification devices      # list and select audio output device
-/voice-notification device <id>  # set output device directly
+/voice-notification              # full status
+/voice-notification on | off     # enable / disable
+/voice-notification devices      # list + pick audio output device
+/voice-notification device <id>  # set device directly
 ```
 
 ### Per-project sounds
 
-Configure a sound effect per project, and choose whether to play sound only, TTS only, or both:
-
 ```
-/voice-notification sound my-api done Glass      # "work done" → plays Glass chime
-/voice-notification sound my-api input Ping      # "needs input" → plays Ping
-/voice-notification sound my-api mode both       # sound first, then TTS (default)
-/voice-notification sound my-api mode sound      # sound only, no TTS
-/voice-notification sound my-api mode tts        # TTS only, ignore sound
-/voice-notification sound default done Tink      # default for all projects
-/voice-notification sound list                   # show all configured sounds
-/voice-notification sound my-api remove          # revert to TTS
+/voice-notification sound my-api done Glass         # "work done" → Glass chime
+/voice-notification sound my-api input Ping         # "needs input" → Ping
+/voice-notification sound my-api failure Basso      # error/limit → Basso
+/voice-notification sound my-api mode both          # sound first, then TTS (default)
+/voice-notification sound my-api mode sound         # effect only, no voice
+/voice-notification sound my-api mode tts           # voice only, no effect
+/voice-notification sound default failure Basso     # default for all projects
+/voice-notification sound list                      # show all configured sounds
+/voice-notification sound my-api remove             # remove project overrides
 ```
 
 **Modes:**
 
 | Mode | What you hear |
 |------|--------------|
-| `both` | Sound plays first, finishes, then TTS speaks — **default when a sound is set** |
-| `sound` | Sound effect only, no voice |
+| `both` | Sound finishes, then TTS speaks — **default when a sound is set** |
+| `sound` | Sound effect only |
 | `tts` | TTS only — **default when no sound is set** |
 
-Sound values accepted:
-- **macOS system sound name** — `Glass`, `Ping`, `Pop`, `Tink`, `Bottle`, `Funk`, `Hero`, `Basso`, `Blow`, `Frog`, `Morse`, `Purr`, `Sosumi`, `Submarine`
-- **Bare filename** — looked up in `~/.claude/voice-notifications/sounds/`
-- **Absolute path** — `/path/to/sound.wav`
-- **`tts`** — force TTS even when a default is set
+**Built-in macOS sounds** (no download needed): `Glass` `Ping` `Pop` `Tink` `Bottle` `Funk` `Hero` `Basso` `Blow` `Frog` `Morse` `Purr` `Sosumi` `Submarine`
 
-See [`sounds/README.md`](sounds/README.md) for free/CC0 sound sources and how to install custom files.
+See [`sounds/README.md`](sounds/README.md) for CC0/GPL sound sources and custom file setup.
+
+### Voice selection
+
+```
+/voice-notification voice my-api Samantha           # per-project TTS voice
+/voice-notification voice default Daniel            # default voice all projects
+/voice-notification voice list                      # list available voices
+```
+
+macOS has 50+ voices: `Samantha`, `Alex`, `Daniel`, `Moira`, `Fiona`, `Karen`, `Tessa`, and more. Assign a distinct voice per project to know who finished without looking.
+
+### Volume
+
+```
+/voice-notification volume my-api 0.8    # 80% for this project (0.0–2.0)
+/voice-notification volume default 1.0   # restore default
+```
+
+Applies to sound files always. For TTS on macOS, generates AIFF via `say -o` then plays with `afplay -v` when volume ≠ `1.0`.
+
+### System banner notifications
+
+On by default. Shows a native macOS banner (or Linux `notify-send`) alongside audio.
+
+```
+/voice-notification banner off   # disable banners
+/voice-notification banner on    # re-enable
+```
+
+### Quiet hours
+
+```
+/voice-notification quiet 22:00 08:00   # silence between 10pm and 8am
+/voice-notification quiet off           # disable quiet hours
+```
+
+Works overnight (e.g. `22:00`–`08:00`) and same-day (e.g. `09:00`–`17:00`).
+
+### Escalation
+
+Re-fires "still needs your input" if you don't respond within N seconds. Volume escalates by 40%.
+
+```
+/voice-notification escalate my-api 30   # re-notify after 30 seconds
+/voice-notification escalate default 60  # default for all projects
+/voice-notification escalate my-api off  # disable
+```
+
+Escalation is automatically cancelled when you respond (Claude finishes the next task).
 
 ### False-positive suppression
 
-The "needs your input" notification is suppressed if it fires within N seconds of the "work done" notification (the default is 3 seconds). This prevents false alerts when Claude finishes a task and an internal hook event immediately follows.
+Prevents "needs your input" from firing right after "work done" (race condition in hooks).
 
 ```
-/voice-notification cooldown 5    # extend to 5 seconds
-/voice-notification cooldown off  # disable suppression entirely
+/voice-notification cooldown 5    # extend window to 5 seconds (default: 3)
+/voice-notification cooldown off  # disable
 ```
 
-### Session identifier
+### Notification log
 
-By default, the scripts try to detect the session name from the environment. You can override it:
-
-```bash
-export CLAUDE_VOICE_SESSION_ID="my-session"
 ```
+/voice-notification log           # show last 30 entries
+/voice-notification log clear     # clear log
+/voice-notification log off       # disable logging
+/voice-notification log on        # re-enable
+```
+
+Log location: `~/.claude/voice-notifications.log`
+
+```
+2026-04-21 09:12:44 | api-service            | done         | stop_reason=end_turn
+2026-04-21 09:14:02 | web-frontend           | input        |
+2026-04-21 09:14:32 | web-frontend           | escalation   | after 30s
+```
+
+### Test
+
+Fire notifications immediately without waiting for a real hook event:
+
+```
+/voice-notification test          # test both done + input
+/voice-notification test done     # test "work done"
+/voice-notification test input    # test "needs input"
+/voice-notification test failure  # test error notification
+```
+
+---
 
 ## How it works
 
 ```
 Claude Code hook fires
-        |
-        v
+        │
+        ▼
   notify-*.sh runs
-        |
-        v
-  Check ~/.claude/voice-notifications-disabled
-        |
-   [exists?]--yes--> exit silently
-        |
-       no
-        |
-        v
-  Read ~/.claude/voice-notifications-device
-        |
-        v
-  Detect TTS engine + route to device:
-    macOS  --> say -a <device>
-    Linux  --> espeak (default device)
-    Docker --> paplay --device=<device> / mpv --audio-device=pulse/<device>
+        │
+        ├─ check disabled flag → exit silently if off
+        ├─ check quiet hours → exit silently if in window
+        ├─ (Stop) check stop_reason:
+        │     tool_use   → skip (intermediate step)
+        │     end_turn   → "work done"
+        │     max_tokens → "check this"
+        │     error/*    → "error encountered"
+        ├─ (Notification) 200ms delay → check cooldown
+        │     recent end_turn Stop? → suppress false positive
+        │
+        ├─ send_banner → osascript / notify-send
+        ├─ log_notification → ~/.claude/voice-notifications.log
+        ├─ (input only) launch notify-escalate.sh in background
+        │
+        └─ dispatch_audio(sound, mode, voice, volume, device, msg)
+              sound mode → afplay / paplay / mpv
+              tts mode   → say / espeak / gTTS
+              both mode  → sound (sync) then TTS
 ```
-
-### Hooks
-
-The install script adds two hooks to `.claude/settings.json`:
-
-- **`Notification`** — fires when Claude sends a notification (needs input, tool approval, etc.)
-- **`Stop`** — fires when Claude finishes responding
-
-### Toggle mechanism
-
-`/voice-notification off` creates `~/.claude/voice-notifications-disabled`. The scripts check for this file and exit immediately if it exists. `/voice-notification on` removes it.
-
-### Device selection
-
-`/voice-notification devices` lists available audio outputs and lets you pick one interactively. The selection is saved to `~/.claude/voice-notifications-device`. Scripts read this file on each notification and route audio to that device.
-
-| Platform | How device is used |
-|----------|-------------------|
-| macOS | `say -a <device>` |
-| PulseAudio | `paplay --device=<device>` |
-| mpv | `mpv --audio-device=pulse/<device>` |
-
-If no device is configured, the system default is used.
 
 ## Supported platforms
 
-| Platform | TTS engine | Audio playback |
-|----------|-----------|----------------|
-| macOS | `say` (built-in) | built-in |
-| Linux | `espeak` | built-in |
-| Docker/sandbox | `gTTS` (Python) | `paplay`, `mpv`, or `aplay` |
+| Platform | TTS | Sound files | Banners |
+|----------|-----|-------------|---------|
+| macOS | `say` | `afplay` | `osascript` |
+| Linux | `espeak` | `paplay` / `aplay` / `mpv` | `notify-send` |
+| Docker | `gTTS` (Python) | `paplay` / `mpv` / `aplay` | — |
 
 ### Linux prerequisites
 
 ```bash
-# Option A: espeak (lightweight, offline)
+# TTS
 sudo apt install espeak
+# or: pip3 install gTTS && sudo apt install pulseaudio-utils
 
-# Option B: gTTS (Google TTS, requires internet)
-pip3 install gTTS
-sudo apt install pulseaudio-utils  # for paplay
+# Banners
+sudo apt install libnotify-bin   # for notify-send
 ```
 
 ## Configuration
 
-| Environment variable | Default | Description |
-|---------------------|---------|-------------|
-| `CLAUDE_VOICE_SESSION_ID` | auto-detected or `local` | Custom name spoken in notifications |
-| `SANDBOX_CLIPBOARD_FILE` | *(set by sandbox)* | Used to auto-detect sandbox ID |
+### Environment variables
 
-## File structure
-
-```
-~/.claude/
-  settings.json                           # hooks added here (global, all projects)
-  voice-notifications/
-    notify-done.sh                        # "work done" notification
-    notify-input.sh                       # "needs your input" notification
-    sounds/                               # drop custom sound files here
-  voice-notifications-disabled            # flag file (only when off)
-  voice-notifications-device             # selected audio device name/ID
-  voice-notifications-sounds.json        # per-project sound config
-  voice-notifications-cooldown           # false-positive cooldown seconds
-  voice-notifications-last-stop          # timestamp of last Stop event (auto-managed)
-
-<your-project>/                           # optional
-  .claude/
-    skills/
-      voice-notification/
-        SKILL.md                          # /voice-notification skill
-```
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `CLAUDE_VOICE_SESSION_ID` | auto / `local` | Name spoken in TTS messages |
+| `NOTIFY_TEST` | `0` | Set to `1` to bypass guards during testing |
 
 ### Example `~/.claude/voice-notifications-sounds.json`
 
 ```json
 {
-  "defaults": { "done": "", "input": "", "mode": "tts" },
+  "global": {
+    "banner": true,
+    "log": true,
+    "quiet_hours": { "start": "22:00", "end": "08:00" }
+  },
+  "defaults": {
+    "done":           "",
+    "input":          "",
+    "failure":        "Basso",
+    "mode":           "both",
+    "voice":          "",
+    "volume":         1.0,
+    "escalate_after": 0
+  },
   "projects": {
-    "api-service":  { "done": "Glass",  "input": "Ping", "mode": "both"  },
+    "api-service":  { "done": "Glass",  "input": "Ping", "failure": "Basso", "mode": "both",  "voice": "Samantha", "volume": 0.8, "escalate_after": 30 },
     "web-frontend": { "done": "Bottle", "input": "Pop",  "mode": "sound" },
-    "scripts":      { "done": "Tink",   "input": "tts",  "mode": "both"  }
+    "scripts":      { "done": "Tink",   "input": "tts",  "mode": "both" }
   }
 }
+```
+
+## File structure
+
+```
+~/.claude/
+  settings.json                           # hooks (global, all projects)
+  voice-notifications/
+    notify-common.sh                      # shared library
+    notify-done.sh                        # Stop hook handler
+    notify-input.sh                       # Notification hook handler
+    notify-escalate.sh                    # escalation re-fire
+    sounds/                               # drop custom sound files here
+  voice-notifications-disabled            # flag: all notifications off
+  voice-notifications-device             # selected audio device
+  voice-notifications-sounds.json        # sounds, voices, volumes, modes
+  voice-notifications-cooldown           # false-positive cooldown seconds
+  voice-notifications-last-stop          # timestamp of last end_turn Stop
+  voice-notifications-last-input         # timestamp of last input notification
+  voice-notifications.log                # notification history
 ```
 
 ## License
