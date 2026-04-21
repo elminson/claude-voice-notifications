@@ -36,8 +36,10 @@ if [ -f "$COOLDOWN_FILE" ]; then
 fi
 
 if [ "$COOLDOWN" -gt 0 ] 2>/dev/null; then
-    # Wait 1 second so any concurrent notify-done.sh can write its timestamp
-    sleep 1
+    # Wait briefly so any concurrent notify-done.sh can write its timestamp.
+    # 200ms is imperceptible to the user but enough to win the race condition
+    # where Notification fires milliseconds before the Stop hook.
+    sleep 0.2
     if [ -f "$LAST_STOP_FILE" ]; then
         LAST_STOP=$(cat "$LAST_STOP_FILE" 2>/dev/null | tr -d '[:space:]')
         NOW=$(date +%s)
