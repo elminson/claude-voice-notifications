@@ -15,6 +15,8 @@ Toggle voice notifications, select audio device, configure per-project sounds, a
 /voice-notification sound <project> input <sound>  — set "needs input" sound for a project
 /voice-notification sound default done <sound>     — set default "work done" sound (all projects)
 /voice-notification sound default input <sound>    — set default "needs input" sound (all projects)
+/voice-notification sound <project> mode <mode>    — set playback mode: sound | tts | both
+/voice-notification sound default mode <mode>      — set default playback mode
 /voice-notification sound <project> remove         — remove custom sounds for a project
 /voice-notification sound list                     — list all configured sounds
 
@@ -27,7 +29,7 @@ Toggle voice notifications, select audio device, configure per-project sounds, a
 - `on` / `off` — Enable or disable all notifications
 - `devices` — Interactively list and select audio output device
 - `device <id>` — Set audio output device directly
-- `sound ...` — Configure per-project sounds (see below)
+- `sound ...` — Configure per-project sounds and playback mode (see below)
 - `cooldown <n>` — Set seconds to wait before firing an input notification after a done notification
 - *(no argument)* — Show current status
 
@@ -75,10 +77,10 @@ All sound config is stored in `~/.claude/voice-notifications-sounds.json`:
 
 ```json
 {
-  "defaults": { "done": "", "input": "" },
+  "defaults": { "done": "", "input": "", "mode": "both" },
   "projects": {
-    "project-1": { "done": "Glass",  "input": "Ping" },
-    "project-2": { "done": "Bottle", "input": "Pop"  }
+    "project-1": { "done": "Glass",  "input": "Ping", "mode": "both"  },
+    "project-2": { "done": "Bottle", "input": "Pop",  "mode": "sound" }
   }
 }
 ```
@@ -89,6 +91,13 @@ All sound config is stored in `~/.claude/voice-notifications-sounds.json`:
 - **Absolute path** — `/path/to/sound.wav`
 - **`tts`** — force TTS even if a default is set
 - **`""` or remove** — revert to TTS
+
+**Mode values:**
+| Mode | Behaviour |
+|------|-----------|
+| `both` | Plays sound first (waits for it to finish), then speaks TTS — **default when a sound is configured** |
+| `sound` | Sound effect only, no TTS |
+| `tts` | TTS only, ignores any configured sound — **default when no sound is configured** |
 
 **`sound <project> done <sound>`:**
 - Read `~/.claude/voice-notifications-sounds.json` (create it as `{}` if missing).
@@ -108,13 +117,21 @@ All sound config is stored in `~/.claude/voice-notifications-sounds.json`:
 - Set `.defaults.input = "<sound>"`.
 - Confirm: "Default input sound set to: <sound>"
 
+**`sound <project> mode <mode>`** (mode = `sound` | `tts` | `both`):
+- Set `.projects["<project>"].mode = "<mode>"`.
+- Confirm: "Playback mode for <project> set to: <mode>"
+
+**`sound default mode <mode>`:**
+- Set `.defaults.mode = "<mode>"`.
+- Confirm: "Default playback mode set to: <mode>"
+
 **`sound <project> remove`:**
 - Delete `.projects["<project>"]` from the JSON.
 - Confirm: "Sounds for <project> removed (will use defaults/TTS)."
 
 **`sound list`:**
 - Read `~/.claude/voice-notifications-sounds.json`.
-- Display a table: project → done sound, input sound.
+- Display a table: project → done sound, input sound, mode.
 - Include the defaults row.
 - If file missing or empty, say "No custom sounds configured. All projects use TTS."
 
@@ -156,9 +173,9 @@ Voice notifications: ON
 Audio device: MacBook Pro Speakers
 False-positive cooldown: 3s
 Configured sounds:
-  api-service   → done: Glass, input: Ping
-  web-frontend  → done: Bottle, input: (tts)
-  (default)     → done: (tts), input: (tts)
+  api-service   → done: Glass,  input: Ping,  mode: both
+  web-frontend  → done: Bottle, input: (tts), mode: sound
+  (default)     → done: (tts),  input: (tts), mode: tts
 ```
 
 ---

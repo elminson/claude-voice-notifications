@@ -47,15 +47,26 @@ Inside Claude Code:
 
 ### Per-project sounds
 
-Configure a sound effect (instead of TTS) per project:
+Configure a sound effect per project, and choose whether to play sound only, TTS only, or both:
 
 ```
-/voice-notification sound my-api done Glass      # "work done" → chime
-/voice-notification sound my-api input Ping      # "needs input" → ping
+/voice-notification sound my-api done Glass      # "work done" → plays Glass chime
+/voice-notification sound my-api input Ping      # "needs input" → plays Ping
+/voice-notification sound my-api mode both       # sound first, then TTS (default)
+/voice-notification sound my-api mode sound      # sound only, no TTS
+/voice-notification sound my-api mode tts        # TTS only, ignore sound
 /voice-notification sound default done Tink      # default for all projects
 /voice-notification sound list                   # show all configured sounds
 /voice-notification sound my-api remove          # revert to TTS
 ```
+
+**Modes:**
+
+| Mode | What you hear |
+|------|--------------|
+| `both` | Sound plays first, finishes, then TTS speaks — **default when a sound is set** |
+| `sound` | Sound effect only, no voice |
+| `tts` | TTS only — **default when no sound is set** |
 
 Sound values accepted:
 - **macOS system sound name** — `Glass`, `Ping`, `Pop`, `Tink`, `Bottle`, `Funk`, `Hero`, `Basso`, `Blow`, `Frog`, `Morse`, `Purr`, `Sosumi`, `Submarine`
@@ -182,11 +193,11 @@ sudo apt install pulseaudio-utils  # for paplay
 
 ```json
 {
-  "defaults": { "done": "", "input": "" },
+  "defaults": { "done": "", "input": "", "mode": "tts" },
   "projects": {
-    "api-service":  { "done": "Glass",  "input": "Ping"   },
-    "web-frontend": { "done": "Bottle", "input": "Pop"    },
-    "scripts":      { "done": "Tink",   "input": "tts"    }
+    "api-service":  { "done": "Glass",  "input": "Ping", "mode": "both"  },
+    "web-frontend": { "done": "Bottle", "input": "Pop",  "mode": "sound" },
+    "scripts":      { "done": "Tink",   "input": "tts",  "mode": "both"  }
   }
 }
 ```
