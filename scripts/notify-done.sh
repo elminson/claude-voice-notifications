@@ -24,6 +24,30 @@ if ! [ -t 0 ]; then
     INPUT=$(cat)
 fi
 
+# Check stop_reason — only act on genuine end-of-turn completions.
+# "tool_use"  → Claude is pausing to run a tool (intermediate step, not done)
+# "end_turn"  → Claude truly finished responding
+# If stop_reason is present and not end_turn, exit silently so we don't play
+# "work done" mid-task and don't write the timestamp that would suppress real
+# "needs your input" notifications for tool approvals.
+STOP_REASON=""
+if [ -n "$INPUT" ] && command -v jq &>/dev/null; then
+    STOP_REASON=$(echo "$INPUT" | jq -r '.stop_reason // empty' 2>/dev/null | grep -v '^null$')
+elif [ -n "$INPUT" ] && command -v python3 &>/dev/null; then
+    STOP_REASON=$(python3 -c "
+import json,sys
+try:
+    d=json.loads(sys.stdin.read())
+    print(d.get('stop_reason',''))
+except:
+    print('')
+" <<< "$INPUT" 2>/dev/null)
+fi
+
+if [ -n "$STOP_REASON" ] && [ "$STOP_REASON" != "end_turn" ]; then
+    exit 0
+fi
+
 # Determine session identifier from env or fallback
 SESSION_ID="${CLAUDE_VOICE_SESSION_ID:-}"
 if [ -z "$SESSION_ID" ] && [ -n "${SANDBOX_CLIPBOARD_FILE:-}" ]; then
@@ -40,7 +64,8 @@ if [ -z "$PROJECT" ]; then
     PROJECT=$(basename "${PWD}" 2>/dev/null)
 fi
 
-# Record last-stop timestamp — used by notify-input.sh to suppress false positives
+# Record last-stop timestamp — used by notify-input.sh to suppress false positives.
+# Written AFTER the stop_reason check so it only reflects genuine end_turn events.
 echo "$(date +%s)" > "${HOME}/.claude/voice-notifications-last-stop"
 
 # Look up per-project sound + mode config

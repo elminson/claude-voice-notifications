@@ -11,9 +11,19 @@ if [ -f "$DISABLED_FILE" ]; then
     exit 0
 fi
 
+# Read hook JSON from stdin FIRST — the pipe is only open at script start.
+# Must happen before any sleep or the data is lost.
+INPUT=""
+if ! [ -t 0 ]; then
+    INPUT=$(cat)
+fi
+
 # False-positive suppression:
-# If notify-done.sh fired within COOLDOWN seconds, this notification is likely
-# a false positive (e.g., an internal hook event following a Stop). Skip it.
+# The Notification hook can fire slightly before the Stop hook for the same
+# end-of-turn event (race condition). Sleep briefly so notify-done.sh has time
+# to write its timestamp, then check whether a real Stop just happened.
+# notify-done.sh only writes the timestamp for end_turn stops, so if the
+# timestamp is recent it means Claude genuinely finished — this is a false positive.
 LAST_STOP_FILE="${HOME}/.claude/voice-notifications-last-stop"
 COOLDOWN_FILE="${HOME}/.claude/voice-notifications-cooldown"
 COOLDOWN=3  # default seconds
@@ -25,11 +35,15 @@ if [ -f "$COOLDOWN_FILE" ]; then
     fi
 fi
 
-if [ "$COOLDOWN" -gt 0 ] 2>/dev/null && [ -f "$LAST_STOP_FILE" ]; then
-    LAST_STOP=$(cat "$LAST_STOP_FILE" 2>/dev/null | tr -d '[:space:]')
-    NOW=$(date +%s)
-    if [[ "$LAST_STOP" =~ ^[0-9]+$ ]] && [ $(( NOW - LAST_STOP )) -le "$COOLDOWN" ] 2>/dev/null; then
-        exit 0  # suppressed: fired too soon after a Stop event
+if [ "$COOLDOWN" -gt 0 ] 2>/dev/null; then
+    # Wait 1 second so any concurrent notify-done.sh can write its timestamp
+    sleep 1
+    if [ -f "$LAST_STOP_FILE" ]; then
+        LAST_STOP=$(cat "$LAST_STOP_FILE" 2>/dev/null | tr -d '[:space:]')
+        NOW=$(date +%s)
+        if [[ "$LAST_STOP" =~ ^[0-9]+$ ]] && [ $(( NOW - LAST_STOP )) -le "$COOLDOWN" ] 2>/dev/null; then
+            exit 0  # suppressed: a real end_turn Stop fired within the cooldown window
+        fi
     fi
 fi
 
@@ -38,12 +52,6 @@ DEVICE_FILE="${HOME}/.claude/voice-notifications-device"
 DEVICE=""
 if [ -f "$DEVICE_FILE" ]; then
     DEVICE=$(cat "$DEVICE_FILE" 2>/dev/null | tr -d '\n')
-fi
-
-# Read hook JSON from stdin (non-blocking)
-INPUT=""
-if ! [ -t 0 ]; then
-    INPUT=$(cat)
 fi
 
 # Determine session identifier from env or fallback
